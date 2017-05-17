@@ -21,13 +21,17 @@ from draw import *
 
   jdyrlandweaver
   ==================== """
+
 varied = False
 frames = 0
+hasFrames = False
 basename = ""
+hasBasename = True
     
 def first_pass( commands ):
     global varied
     global frames
+    global hasFrames
     global basename
 
     for command in commands:
@@ -39,17 +43,20 @@ def first_pass( commands ):
 
         if line == "basename":
             basename = args[0]
+            hasBasename = True
 
         if line == "frames":
             frames = int(args[0])
+            hasFrames = True
 
     if varied and not(frames):
         exit()
 
-    if frames and not(basename):
+    if hasFrames and not(hasBasename):
         basename = "jonalfdyrlandweaver"
         print "You forgot the basename, it is now jonalfdyrlandweaver."
-
+        
+    return frames
     #return second_pass(commands, frames)
 
 """======== second_pass( commands ) ==========
@@ -73,54 +80,63 @@ knobs = []
 
 def second_pass( commands, num_frames ):
     global knobs
-    global frames
+    global hasFrames
     
-    if not(frames):
-        exit()
+    if not(hasFrames):
+        return
 
     knobs = [{} for x in range(num_frames)]
 
     for command in commands:
-        line = command[0]
+        c = command[0]
         args = command[1:]
 
-        if line == "vary":
-            knobName = args[0]
-            startFrame = args[1]
-            endFrame = args[2]
+        if c == 'vary':
+
+            name = args[0]
+            startFrame  = int(args[1])
+            endFrame = int(args[2])
             startValue = float(args[3])
             endValue = float(args[4])
 
-            if ((endFrame - startFrame) <= 0):
-                print "Hey bud your frames are negative..."
+            if (endFrame - startFrame) < 0 or startFrame < 0 or endFrame >= frames:
+                print 'Bro check your frames these are some weird numbers'
                 return
 
-            increment = (endValue - startValue) / (endFrame - startValue)
-            currentFrame = 0.0
-
-            #if our increment is negative, swap starterino and enderino framez
+            increment = (endValue - startValue) / (endFrame - startFrame)
+            currentFrame = startValue
+            
             if increment < 0:
                 increment *= -1.0
+                currentFrame = endValue #change the start
                 for frame in range(endFrame, startFrame - 1, -1):
-                    knobs[frame][knobName] = currentFrame
-                    currentFrame += increment
+                    knobs[frame][name] = currentFrame
+                    if currentFrame < startValue:
+                        currentFrame += increment
             else:
-                for frame in range(startFrame, endFrame + 1, 1):
-                    knobs[frame][knobName] = currentFrame
-                    currentFrame += increment
+                for frame in range(startFrame,endFrame + 1, 1):
+                    knobs[frame][name] = currentFrame
+                    if currentFrame < endValue:
+                        currentFrame += increment
+    return knobs
+
 
 def run(filename):
     """
     This function runs an mdl script
     """
     global frames
+    global hasFrames
     global basename
+    global hasBasename
     global knobs
     
     color = [255, 255, 255]
     tmp = new_matrix()
     ident( tmp )
-
+    screen = new_screen()
+    step = 0.1
+    
     p = mdl.parseFile(filename)
 
     if p:
@@ -130,27 +146,32 @@ def run(filename):
         return
 
     first_pass(commands)
-    second_pass(commands, frames)
+    second_pass(commands,frames)
 
-    #if frames == 0
-    if not(frames):
+    if not(hasFrames):
         frames = 1
-
-    #run all this for all frames
+    
     for frame in range(frames):
         tmp = new_matrix()
         ident(tmp)
         stack = [ [x[:] for x in tmp] ]
-        screen = new_screen()
+        
         tmp = []
         step = 0.1
-        
         for command in commands:
             print command
             c = command[0]
             args = command[1:]
+
+            if c == 'set':
+                symbols[args[0]][1] = float(args[1]) 
+
+            elif c == 'setknobs':
+                for s in symbols:
+                    if symbols[s][0] == 'knob':
+                        symbols[s][1] = float(args[0])
             
-            if c == 'box':
+            elif c == 'box':
                 add_box(tmp,
                         args[0], args[1], args[2],
                         args[3], args[4], args[5])
@@ -170,31 +191,34 @@ def run(filename):
                 draw_polygons(tmp, screen, color)
                 tmp = []
             elif c == 'move':
+                
                 if args[3] != None:
                     a = knobs[frame][args[3]] * args[0]
                     b = knobs[frame][args[3]] * args[1]
                     c = knobs[frame][args[3]] * args[2]
-                    args = (a, b, c, args[3])
-                    
+                    args = (a,b,c,args[3])
+                
                 tmp = make_translate(args[0], args[1], args[2])
                 matrix_mult(stack[-1], tmp)
                 stack[-1] = [x[:] for x in tmp]
                 tmp = []
             elif c == 'scale':
+                
                 if args[3] != None:
                     a = knobs[frame][args[3]] * args[0]
                     b = knobs[frame][args[3]] * args[1]
                     c = knobs[frame][args[3]] * args[2]
-                    args = (a, b, c, args[3])
-                    
+                    args = (a,b,c,args[3])
+                
                 tmp = make_scale(args[0], args[1], args[2])
                 matrix_mult(stack[-1], tmp)
                 stack[-1] = [x[:] for x in tmp]
                 tmp = []
             elif c == 'rotate':
+
                 if args[2] != None:
                     a = knobs[frame][args[2]] * args[1]
-                    args = (args[0], a, args[2])
+                    args = (args[0],a,args[2])
                 
                 theta = args[1] * (math.pi/180)
                 if args[0] == 'x':
@@ -203,9 +227,10 @@ def run(filename):
                     tmp = make_rotY(theta)
                 else:
                     tmp = make_rotZ(theta)
-                    matrix_mult( stack[-1], tmp )
-                    stack[-1] = [ x[:] for x in tmp]
-                    tmp = []
+                matrix_mult( stack[-1], tmp )
+                stack[-1] = [ x[:] for x in tmp]
+                tmp = []
+                
             elif c == 'push':
                 stack.append([x[:] for x in stack[-1]] )
             elif c == 'pop':
@@ -214,15 +239,14 @@ def run(filename):
                 display(screen)
             elif c == 'save':
                 save_extension(screen, args[0])
-            #name the animatino file
-            name = 'anim/' + basename + ( 3 - len(str(frame)) ) * '0' + str(frame) + '.ppm'
-            
-            #make dir if no existerino
-            if not os.path.exists('anim'):
-                os.makedirs('anim')
 
-            save_ppm(screen,name)
-            clear_screen(screen)
+        name = 'anim/' + basename + (3-len(str(frame)))*'0' + str(frame) + '.ppm'
 
-        #and finally
-        make_animation(basename)
+        if not os.path.exists('anim'):
+            os.makedirs('anim')
+        
+        save_ppm(screen,name)
+        clear_screen(screen)
+
+    make_animation(basename)
+    print symbols
